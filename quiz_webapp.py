@@ -194,7 +194,8 @@ def init_session_state():
         st.session_state.shuffled_mcq_options = {} # {index_in_quiz_pool: [options_list]}
     if 'matching_answers' not in st.session_state:
         st.session_state.matching_answers = {}  # Will store {question_idx: {term_idx: selected_definition_idx}}
-
+    if 'shuffled_matching_definitions' not in st.session_state:
+        st.session_state.shuffled_matching_definitions = {}  # {q_idx_pool: shuffled_definitions_list}
 
 # --- Callback Functions ---
 def check_login():
@@ -496,8 +497,17 @@ def display_question_quiz(q_idx_pool):
         if q_idx_pool not in st.session_state.matching_answers:
             st.session_state.matching_answers[q_idx_pool] = {}
         
-        # Get all definitions to create the dropdown options
+        # Get all definitions and shuffle them (only once per quiz session)
         all_definitions = [term.get('Definition', 'No definition') for term in matching_terms]
+        
+        # Shuffle definitions the first time we see this question
+        if q_idx_pool not in st.session_state.shuffled_matching_definitions:
+            shuffled_definitions = all_definitions.copy()
+            random.shuffle(shuffled_definitions)
+            st.session_state.shuffled_matching_definitions[q_idx_pool] = shuffled_definitions
+        else:
+            # Use the already shuffled definitions
+            shuffled_definitions = st.session_state.shuffled_matching_definitions[q_idx_pool]
         
         # Create a table-like display with terms on left, dropdown selection on right
         for i, term_data in enumerate(matching_terms):
@@ -511,14 +521,16 @@ def display_question_quiz(q_idx_pool):
             with cols[2]:
                 current_selection = st.session_state.matching_answers.get(q_idx_pool, {}).get(i)
                 
+                # Find the index of the current selection in the shuffled definitions
                 try:
-                    selected_index = all_definitions.index(current_selection) if current_selection in all_definitions else 0
+                    selected_index = shuffled_definitions.index(current_selection) if current_selection in shuffled_definitions else 0
                 except (ValueError, TypeError):
                     selected_index = 0
                 
+                # Create the dropdown with shuffled definitions
                 selection = st.selectbox(
                     f"Definition for {term}",
-                    options=all_definitions,
+                    options=shuffled_definitions,
                     index=selected_index,
                     key=f"matching_{q_idx_pool}_{i}",
                     label_visibility="collapsed"
@@ -579,6 +591,7 @@ def reset_quiz():
     st.session_state.submitted = False
     st.session_state.shuffled_mcq_options = {}
     st.session_state.matching_answers = {}
+    st.session_state.shuffled_matching_definitions = {}  # Reset the shuffled definitions
     # Reset selected counts too
     st.session_state.selected_counts = {
         q_type: 0 for q_type in st.session_state.available_counts
