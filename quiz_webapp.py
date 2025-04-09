@@ -158,15 +158,12 @@ def load_and_process_questions(filename):
 
 
 # --- Initialize Session State ---
+# --- Initialize Session State ---
 def init_session_state():
-    # Login & Setup Flow
+    # Set logged_in to True by default to bypass login screen
     if 'logged_in' not in st.session_state:
-        st.session_state.logged_in = False
-    if 'password_attempt' not in st.session_state:
-        st.session_state.password_attempt = ""
-    if 'setup_complete' not in st.session_state:
-        st.session_state.setup_complete = False # New flag for setup screen
-
+        st.session_state.logged_in = True
+    
     # Question Data
     if 'questions_by_type' not in st.session_state:
         st.session_state.questions_by_type = {}
@@ -180,6 +177,8 @@ def init_session_state():
         st.session_state.selected_matching_groups = [] # List of group names chosen
 
     # Quiz State
+    if 'setup_complete' not in st.session_state:
+        st.session_state.setup_complete = False # New flag for setup screen
     if 'quiz_pool' not in st.session_state:
         st.session_state.quiz_pool = [] # The final list of questions for this quiz session
     if 'current_question_index' not in st.session_state:
@@ -196,6 +195,32 @@ def init_session_state():
         st.session_state.matching_answers = {}  # Will store {question_idx: {term_idx: selected_definition_idx}}
     if 'shuffled_matching_definitions' not in st.session_state:
         st.session_state.shuffled_matching_definitions = {}  # {q_idx_pool: shuffled_definitions_list}
+        
+    # Load questions immediately
+    if not st.session_state.questions_by_type:
+        try:
+            questions_by_type, matching_groups_data, all_questions = load_and_process_questions(CSV_FILENAME)
+            
+            # Make sure we got valid data
+            if questions_by_type and isinstance(questions_by_type, dict):
+                st.session_state.questions_by_type = questions_by_type
+                st.session_state.matching_groups_data = matching_groups_data
+                
+                # Calculate available counts (excluding matching initially)
+                st.session_state.available_counts = {
+                    q_type: len(q_list) for q_type, q_list in questions_by_type.items() if q_type != 'Matching'
+                }
+                
+                # Initialize selected counts
+                st.session_state.selected_counts = {
+                    q_type: 0 for q_type in st.session_state.available_counts
+                }
+                
+                st.session_state.selected_matching_groups = []  # Reset selected groups
+            else:
+                st.error(f"Could not process question data from {CSV_FILENAME}. Check file format.")
+        except Exception as e:
+            st.error(f"Error loading questions: {str(e)}")
 
 # --- Callback Functions ---
 def check_login():
@@ -778,22 +803,19 @@ def display_results_quiz():
 # --- Main App Logic ---
 init_session_state()
 
-if not st.session_state.logged_in:
-    display_login()
+if not st.session_state.questions_by_type:
+    st.error("Question data could not be loaded. Please check the CSV file format.")
 elif not st.session_state.setup_complete:
-    if not st.session_state.questions_by_type:
-        st.error("Question data could not be loaded. Cannot proceed to setup.")
-    else:
-        display_setup_screen()
+    display_setup_screen()
 elif st.session_state.submitted:
     display_results_quiz()
 else:
     if not st.session_state.quiz_pool:
-         st.error("Quiz pool is empty. Cannot start quiz.")
-         # Add button to go back to setup?
-         if st.button("Return to Setup"):
-             st.session_state.setup_complete = False
-             st.rerun()
+        st.error("Quiz pool is empty. Cannot start quiz.")
+        # Add button to go back to setup
+        if st.button("Return to Setup"):
+            st.session_state.setup_complete = False
+            st.rerun()
     else:
-         display_sidebar_quiz()
-         display_question_quiz(st.session_state.current_question_index)
+        display_sidebar_quiz()
+        display_question_quiz(st.session_state.current_question_index)
