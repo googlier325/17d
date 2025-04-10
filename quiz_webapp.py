@@ -158,7 +158,6 @@ def load_and_process_questions(filename):
 
 
 # --- Initialize Session State ---
-# --- Initialize Session State ---
 def init_session_state():
     # Set logged_in to True by default to bypass login screen
     if 'logged_in' not in st.session_state:
@@ -195,6 +194,10 @@ def init_session_state():
         st.session_state.matching_answers = {}  # Will store {question_idx: {term_idx: selected_definition_idx}}
     if 'shuffled_matching_definitions' not in st.session_state:
         st.session_state.shuffled_matching_definitions = {}  # {q_idx_pool: shuffled_definitions_list}
+    
+    # Learning Mode State
+    if 'learning_mode' not in st.session_state:
+        st.session_state.learning_mode = False  # Flag for learning mode
         
     # Load questions immediately
     if not st.session_state.questions_by_type:
@@ -327,7 +330,6 @@ def save_answer(q_idx_pool):
             st.session_state.user_answers[q_idx_pool] = (answer == "True") # Store as bool
         else:
             st.session_state.user_answers[q_idx_pool] = answer # Store string/other
-    # st.rerun() # Consider if needed to update sidebar immediately
 
 def toggle_flag(q_idx_pool):
     """Toggles the flag status for the current question index in the quiz_pool without navigating."""
@@ -390,6 +392,14 @@ def display_setup_screen():
         st.session_state.selected_matching_groups = temp_selected_groups
 
     st.divider()
+    
+    # Add Learning Mode Option
+    st.subheader("Quiz Mode")
+    st.session_state.learning_mode = st.checkbox(
+        "Learning Mode (Check answers as you go)",
+        value=st.session_state.learning_mode,
+        help="When enabled, you can check your answers immediately and see explanations during the quiz."
+    )
 
     # Calculate total questions dynamically
     total_standard = sum(st.session_state.selected_counts.values())
@@ -401,6 +411,13 @@ def display_setup_screen():
     if st.button("Start Quiz", type="primary", disabled=(total_selected == 0)):
         start_quiz()
         st.rerun() # Rerun to move to the quiz display
+
+def check_answer(q_idx_pool):
+    """Marks the current question as checked for Learning Mode."""
+    if not st.session_state.learning_mode:
+        return
+    
+    st.session_state.checked_answers[q_idx_pool] = True
 
 def display_sidebar_quiz():
     st.sidebar.title("Questions")
@@ -426,6 +443,79 @@ def display_sidebar_quiz():
     if st.sidebar.button("Submit Quiz", type="primary", use_container_width=True):
         submit_quiz()
         st.rerun()
+
+def init_session_state():
+    # Set logged_in to True by default to bypass login screen
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = True
+    
+    # Question Data
+    if 'questions_by_type' not in st.session_state:
+        st.session_state.questions_by_type = {}
+    if 'matching_groups_data' not in st.session_state:
+        st.session_state.matching_groups_data = {} # Store grouped matching questions
+    if 'available_counts' not in st.session_state:
+        st.session_state.available_counts = {}
+    if 'selected_counts' not in st.session_state:
+        st.session_state.selected_counts = {} # {q_type: count}
+    if 'selected_matching_groups' not in st.session_state:
+        st.session_state.selected_matching_groups = [] # List of group names chosen
+
+    # Quiz State
+    if 'setup_complete' not in st.session_state:
+        st.session_state.setup_complete = False # New flag for setup screen
+    if 'quiz_pool' not in st.session_state:
+        st.session_state.quiz_pool = [] # The final list of questions for this quiz session
+    if 'current_question_index' not in st.session_state:
+        st.session_state.current_question_index = 0
+    if 'user_answers' not in st.session_state:
+        st.session_state.user_answers = {} # {index_in_quiz_pool: answer}
+    if 'flagged_questions' not in st.session_state:
+        st.session_state.flagged_questions = {} # {index_in_quiz_pool: bool}
+    if 'submitted' not in st.session_state:
+        st.session_state.submitted = False
+    if 'shuffled_mcq_options' not in st.session_state:
+        st.session_state.shuffled_mcq_options = {} # {index_in_quiz_pool: [options_list]}
+    if 'matching_answers' not in st.session_state:
+        st.session_state.matching_answers = {}  # Will store {question_idx: {term_idx: selected_definition_idx}}
+    if 'shuffled_matching_definitions' not in st.session_state:
+        st.session_state.shuffled_matching_definitions = {}  # {q_idx_pool: shuffled_definitions_list}
+    
+    # Learning Mode State
+    if 'learning_mode' not in st.session_state:
+        st.session_state.learning_mode = False  # Flag for learning mode
+    if 'verified_matching_questions' not in st.session_state:
+        st.session_state.verified_matching_questions = {}  # {q_idx_pool: bool} to track verified matching questions
+        
+    # Load questions immediately
+    if not st.session_state.questions_by_type:
+        try:
+            questions_by_type, matching_groups_data, all_questions = load_and_process_questions(CSV_FILENAME)
+            
+            # Make sure we got valid data
+            if questions_by_type and isinstance(questions_by_type, dict):
+                st.session_state.questions_by_type = questions_by_type
+                st.session_state.matching_groups_data = matching_groups_data
+                
+                # Calculate available counts (excluding matching initially)
+                st.session_state.available_counts = {
+                    q_type: len(q_list) for q_type, q_list in questions_by_type.items() if q_type != 'Matching'
+                }
+                
+                # Initialize selected counts
+                st.session_state.selected_counts = {
+                    q_type: 0 for q_type in st.session_state.available_counts
+                }
+                
+                st.session_state.selected_matching_groups = []  # Reset selected groups
+            else:
+                st.error(f"Could not process question data from {CSV_FILENAME}. Check file format.")
+        except Exception as e:
+            st.error(f"Error loading questions: {str(e)}")
+
+def verify_matching_question(q_idx_pool):
+    """Marks a matching question as verified for Learning Mode."""
+    st.session_state.verified_matching_questions[q_idx_pool] = True
 
 def display_question_quiz(q_idx_pool):
     if not st.session_state.quiz_pool or q_idx_pool >= len(st.session_state.quiz_pool):
@@ -461,6 +551,8 @@ def display_question_quiz(q_idx_pool):
 
     # --- Answer Input based on Type ---
     current_answer = st.session_state.user_answers.get(q_idx_pool)
+    has_answer = current_answer is not None
+    is_verified = False  # For matching questions
 
     if q_type == 'MCQ':
         correct_answer = question_data.get('CorrectAnswer', 'N/A')
@@ -481,11 +573,13 @@ def display_question_quiz(q_idx_pool):
 
         answer = st.radio(
             "Choose the best answer:", options, index=current_selection_index,
-            key=f"q_{q_idx_pool}", label_visibility='collapsed'
+            key=f"q_{q_idx_pool}", label_visibility='collapsed',
+            on_change=save_answer, args=(q_idx_pool,)
         )
         
-        # Save answer directly
-        st.session_state.user_answers[q_idx_pool] = answer
+        # Save answer directly without on_change to avoid duplication
+        if not has_answer:
+            st.session_state.user_answers[q_idx_pool] = answer
 
     elif q_type == 'TF':
         options = ["True", "False"]
@@ -493,23 +587,26 @@ def display_question_quiz(q_idx_pool):
         
         answer = st.radio(
             "Select True or False:", options, index=current_selection_index,
-            key=f"q_{q_idx_pool}", label_visibility='collapsed'
+            key=f"q_{q_idx_pool}", label_visibility='collapsed',
+            on_change=save_answer, args=(q_idx_pool,)
         )
         
-        # Convert string to boolean and save
-        if answer == "True":
-            st.session_state.user_answers[q_idx_pool] = True
-        elif answer == "False":
-            st.session_state.user_answers[q_idx_pool] = False
+        # Convert string to boolean and save for initial answer
+        if not has_answer:
+            if answer == "True":
+                st.session_state.user_answers[q_idx_pool] = True
+            elif answer == "False":
+                st.session_state.user_answers[q_idx_pool] = False
 
     elif q_type == 'FillBlank':
         answer = st.text_input(
             "Enter your answer:", value=current_answer if current_answer else "",
-            key=f"q_{q_idx_pool}"
+            key=f"q_{q_idx_pool}", on_change=save_answer, args=(q_idx_pool,)
         )
         
-        # Save answer directly
-        st.session_state.user_answers[q_idx_pool] = answer
+        # Save answer directly for initial value
+        if not has_answer and answer:
+            st.session_state.user_answers[q_idx_pool] = answer
 
     elif q_type == 'MatchingGroup':
         group_name = question_data.get('Group', 'Unknown Group')
@@ -535,6 +632,8 @@ def display_question_quiz(q_idx_pool):
             shuffled_definitions = st.session_state.shuffled_matching_definitions[q_idx_pool]
         
         # Create a table-like display with terms on left, dropdown selection on right
+        all_terms_matched = True  # Track if all terms have selections
+        
         for i, term_data in enumerate(matching_terms):
             term = term_data.get('Term', 'Unknown Term')
             correct_definition = term_data.get('Definition', 'No definition')
@@ -552,22 +651,39 @@ def display_question_quiz(q_idx_pool):
                 except (ValueError, TypeError):
                     selected_index = 0
                 
+                # Create unique widget key to detect changes
+                matching_widget_key = f"matching_{q_idx_pool}_{i}"
+                
                 # Create the dropdown with shuffled definitions
                 selection = st.selectbox(
                     f"Definition for {term}",
                     options=shuffled_definitions,
                     index=selected_index,
-                    key=f"matching_{q_idx_pool}_{i}",
+                    key=matching_widget_key,
                     label_visibility="collapsed"
                 )
                 
-                # Save this selection
+                # Save this selection from the widget to state
                 if q_idx_pool not in st.session_state.matching_answers:
                     st.session_state.matching_answers[q_idx_pool] = {}
+                
                 st.session_state.matching_answers[q_idx_pool][i] = selection
+                
+                # Check if this term has been matched
+                if not selection:
+                    all_terms_matched = False
 
         # Store the matching answers in the user_answers dictionary
         st.session_state.user_answers[q_idx_pool] = st.session_state.matching_answers.get(q_idx_pool, {})
+        
+        # Add a verify button for learning mode
+        if st.session_state.learning_mode:
+            is_verified = st.session_state.verified_matching_questions.get(q_idx_pool, False)
+            
+            if not is_verified:
+                if st.button("Verify Answers", key=f"verify_btn_{q_idx_pool}", use_container_width=True):
+                    verify_matching_question(q_idx_pool)
+                    st.rerun()
         
     elif q_type == 'Matching':  # Handle individual matching items (should not occur with our fix)
         st.info(f"""
@@ -581,6 +697,67 @@ def display_question_quiz(q_idx_pool):
 
     else:
         st.warning(f"Unsupported question type: {q_type}")
+
+    # --- Learning Mode: Automatic Answer Feedback ---
+    if st.session_state.learning_mode and has_answer:
+        # For regular questions, show feedback immediately
+        # For matching questions, only show feedback if verified
+        is_matching = q_type == 'MatchingGroup'
+        is_verified = st.session_state.verified_matching_questions.get(q_idx_pool, False)
+        
+        if (not is_matching) or (is_matching and is_verified):
+            st.divider()
+            st.subheader("Answer Feedback:")
+            
+            if q_type in ["MCQ", "TF", "FillBlank"]:
+                correct_answer = question_data.get('CorrectAnswer')
+                is_correct = False
+                
+                if q_type == "TF":
+                    is_correct = (current_answer == correct_answer)
+                elif q_type in ["MCQ", "FillBlank"]:
+                    is_correct = (str(current_answer).strip().lower() == str(correct_answer).strip().lower())
+                
+                # Display correctness with appropriate styling
+                if is_correct:
+                    st.markdown("✅ **Correct!**")
+                else:
+                    st.markdown("❌ **Incorrect.**")
+                    st.markdown(f"Correct answer: **{correct_answer}**")
+                
+                # Show explanation
+                if explanation:
+                    st.markdown("**Explanation:**")
+                    st.markdown(explanation)
+            
+            elif q_type == "MatchingGroup" and is_verified:
+                matching_terms = question_data.get('MatchingTerms', [])
+                user_matching_answers = st.session_state.matching_answers.get(q_idx_pool, {})
+                
+                st.markdown("**Matching Results:**")
+                
+                # Display results for each term
+                for i, term_data in enumerate(matching_terms):
+                    term = term_data.get('Term', 'Unknown Term')
+                    correct_definition = term_data.get('Definition', 'No definition')
+                    user_definition = user_matching_answers.get(i)
+                    
+                    if user_definition:
+                        is_term_correct = user_definition.strip().lower() == correct_definition.strip().lower()
+                        result_icon = "✅" if is_term_correct else "❌"
+                        
+                        # Display term result
+                        st.markdown(f"{result_icon} **{term}**")
+                        
+                        if not is_term_correct:
+                            st.markdown(f"Your match: {user_definition}")
+                            st.markdown(f"Correct match: **{correct_definition}**")
+                        
+                        # Show explanation if available for the term
+                        term_explanation = term_data.get('Explanation', '')
+                        if term_explanation:
+                            with st.expander(f"Explanation for {term}"):
+                                st.markdown(term_explanation)
 
     st.divider()
 
@@ -617,11 +794,13 @@ def reset_quiz():
     st.session_state.shuffled_mcq_options = {}
     st.session_state.matching_answers = {}
     st.session_state.shuffled_matching_definitions = {}  # Reset the shuffled definitions
+    st.session_state.verified_matching_questions = {}  # Reset verified matching questions
     # Reset selected counts too
     st.session_state.selected_counts = {
         q_type: 0 for q_type in st.session_state.available_counts
     }
     st.session_state.selected_matching_groups = []
+    # Keep learning mode setting for next quiz
 
 def display_results_quiz():
     st.title("Quiz Results")
